@@ -46,18 +46,23 @@ print(f"✅ 총 생성된 이미지 수: {count}")
 
 
 import os
+from PIL import Image
 
-input_dir = r"2026_youth/ai26/wash_data"
+input_dir = "/home/jetson/2026_youth/ai26/wash_data"
+output_dir = "/home/jetson/2026_youth/ai26/wash_data_test"
 
-print("현재 실행 위치:", os.getcwd())
-print("wash_data 존재:", os.path.exists(input_dir))
+os.makedirs(output_dir, exist_ok=True)
 
 for label in ["clean", "dirty"]:
-    path = os.path.join(input_dir, label)
-    print(f"\n📂 {label} 폴더 존재:", os.path.exists(path))
+    in_dir = os.path.join(input_dir, label)
+    out_dir = os.path.join(output_dir, label)
+    os.makedirs(out_dir, exist_ok=True)
 
-    if os.path.exists(path):
-        files = os.listdir(path)
-        print(f"{label} 안 파일 개수:", len(files))
-        print("예시 파일:", files[:3])
+    for f in os.listdir(in_dir):
+        if f.lower().endswith(".png"):
+            img = Image.open(os.path.join(in_dir, f))
+            img.save(os.path.join(out_dir, f))
+
+print("✅ 테스트 완료")
+
 
