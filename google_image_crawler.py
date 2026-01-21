@@ -1,69 +1,45 @@
 import os
-import re
-import nltk
-from nltk.corpus import movie_reviews
+from PIL import Image
+from torchvision import transforms
 
-# ===============================
-# 1. NLTK 데이터 경로 설정
-# ===============================
-DATA_PATH = "/home/jetson/2026_youth/ai26/wash_data"
-nltk.data.path.append(DATA_PATH)
+# 경로 설정
+input_dir = "dataset/original"
+output_dir = "dataset/augmented"
+os.makedirs(output_dir, exist_ok=True)
 
-# (이미 있으면 다시 안 받음)
-nltk.download("movie_reviews", download_dir=DATA_PATH)
+# 증강 파이프라인
+transform = transforms.Compose([
+    transforms.RandomRotation(20),
+    transforms.RandomHorizontalFlip(p=0.5),
+    transforms.ColorJitter(
+        brightness=0.3,
+        contrast=0.3,
+        saturation=0.2
+    ),
+    transforms.RandomResizedCrop(
+        size=224,
+        scale=(0.8, 1.0)
+    )
+])
 
-# ===============================
-# 2. 저장할 증강 데이터 경로
-# ===============================
-SAVE_BASE = "/home/jetson/2026_youth/ai26/wash_data/augmented_reviews"
+# 한 이미지당 생성할 개수
+AUG_PER_IMAGE = 10  # 필요에 따라 조절
 
-for label in ["pos", "neg"]:
-    os.makedirs(os.path.join(SAVE_BASE, label), exist_ok=True)
-
-# ===============================
-# 3. 전처리 함수 (증강용)
-# ===============================
-def preprocess_text(words):
-    """
-    - 소문자 변환
-    - 특수문자 제거
-    """
-    text = " ".join(words).lower()
-    text = re.sub(r"[^a-z\s]", "", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
-
-# ===============================
-# 4. 데이터 증강 + 저장
-# ===============================
 count = 0
 
-for fileid in movie_reviews.fileids():
-    label = movie_reviews.categories(fileid)[0]
-    words = movie_reviews.words(fileid)
+for filename in os.listdir(input_dir):
+    if not filename.endswith((".jpg", ".png")):
+        continue
 
-    # (1) 원본 텍스트
-    original_text = " ".join(words)
+    img_path = os.path.join(input_dir, filename)
+    img = Image.open(img_path).convert("RGB")
 
-    # (2) 전처리된 텍스트 (증강)
-    cleaned_text = preprocess_text(words)
+    name, ext = os.path.splitext(filename)
 
-    # 파일 이름 (슬래시 제거)
-    base_name = fileid.replace("/", "_")
+    for i in range(AUG_PER_IMAGE):
+        aug_img = transform(img)
+        save_name = f"{name}_aug{i}{ext}"
+        aug_img.save(os.path.join(output_dir, save_name))
+        count += 1
 
-    # 저장 경로
-    orig_path  = os.path.join(SAVE_BASE, label, f"{base_name}_orig.txt")
-    clean_path = os.path.join(SAVE_BASE, label, f"{base_name}_clean.txt")
-
-    # 파일 저장
-    with open(orig_path, "w", encoding="utf-8") as f:
-        f.write(original_text)
-
-    with open(clean_path, "w", encoding="utf-8") as f:
-        f.write(cleaned_text)
-
-    count += 2
-
-print("✅ 데이터 증강 완료")
-print(f"총 생성된 리뷰 파일 수: {count}")
-print(f"저장 위치: {SAVE_BASE}")
+print(f"✅ 총 생성된 이미지 수: {count}")
