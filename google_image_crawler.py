@@ -88,80 +88,78 @@ print(f"✅ 총 생성된 이미지 수: {total}")
 
 from pathlib import Path
 import shutil
-from sklearn.model_selection import train_test_split
 import random
 
-# 설정
-root = Path("/home/jetson/2026_youth/ai26/wash_date")
-clear_dir = root / "clear"
+# =====================
+# 경로 설정
+# =====================
+root = Path("/home/jetson/2026_youth/ai26/wash_data")        # 원본 데이터
+aug_root = Path("/home/jetson/2026_youth/ai26/wash_data_aug")  # 증강 데이터
+
+clear_dir = root / "clean"
 dirty_dir = root / "dirty"
 
-# 출력 디렉토리 (YOLO 분류 형식)
-output_root = root / "organized"
+aug_clear_dir = aug_root / "clean"
+aug_dirty_dir = aug_root / "dirty"
+
+# 출력 디렉토리
+output_root = root.parent / "organized"
 output_root.mkdir(exist_ok=True)
 
+# =====================
 # 이미지 수집
+# =====================
 clear_images = list(clear_dir.glob("*.png"))
 dirty_images = list(dirty_dir.glob("*.png"))
 
-print(f"✅ clear 이미지: {len(clear_images)}개")
-print(f"✅ dirty 이미지: {len(dirty_images)}개")
+aug_clear_images = list(aug_clear_dir.glob("*.png"))
+aug_dirty_images = list(aug_dirty_dir.glob("*.png"))
 
-# train/val/test 비율 설정 (70/15/15)
-def split_data(images, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15):
+print(f"✅ 원본 clear 이미지: {len(clear_images)}개")
+print(f"✅ 원본 dirty 이미지: {len(dirty_images)}개")
+print(f"🔥 증강 clear 이미지: {len(aug_clear_images)}개")
+print(f"🔥 증강 dirty 이미지: {len(aug_dirty_images)}개")
+
+# =====================
+# val / test 분할 (원본만 사용)
+# =====================
+def split_val_test(images, val_ratio=0.5):
     random.shuffle(images)
-    
-    n = len(images)
-    train_end = int(n * train_ratio)
-    val_end = train_end + int(n * val_ratio)
-    
-    train = images[:train_end]
-    val = images[train_end:val_end]
-    test = images[val_end:]
-    
-    return train, val, test
+    mid = int(len(images) * val_ratio)
+    return images[:mid], images[mid:]
 
-# 각 클래스별로 분할
-clear_train, clear_val, clear_test = split_data(clear_images)
-dirty_train, dirty_val, dirty_test = split_data(dirty_images)
+clear_val, clear_test = split_val_test(clear_images)
+dirty_val, dirty_test = split_val_test(dirty_images)
 
-# 디렉토리 생성 및 파일 복사
+# =====================
+# 파일 복사 함수
+# =====================
 def copy_images(image_list, split, class_name):
     dest_dir = output_root / split / class_name
     dest_dir.mkdir(parents=True, exist_ok=True)
-    
+
     for img in image_list:
         shutil.copy2(img, dest_dir / img.name)
-    
+
     return len(image_list)
 
+# =====================
 # 복사 실행
+# =====================
 print("\n📁 파일 복사 중...")
-splits = {
-    "train": (clear_train, dirty_train),
-    "val": (clear_val, dirty_val),
-    "test": (clear_test, dirty_test)
-}
 
-for split, (clear_imgs, dirty_imgs) in splits.items():
-    clear_count = copy_images(clear_imgs, split, "clear")
-    dirty_count = copy_images(dirty_imgs, split, "dirty")
-    print(f"✅ {split:5s}: clear={clear_count:3d}, dirty={dirty_count:3d}")
+# train → 증강 데이터
+train_clear = copy_images(aug_clear_images, "train", "clean")
+train_dirty = copy_images(aug_dirty_images, "train", "dirty")
+print(f"✅ train : clean={train_clear}, dirty={train_dirty}")
 
-print(f"\n✅ 완료! 결과: {output_root}")
-print("\n📂 최종 구조:")
-print("""
-organized/
-├── train/
-│   ├── clear/  (png files)
-│   └── dirty/  (png files)
-├── val/
-│   ├── clear/
-│   └── dirty/
-└── test/
-    ├── clear/
-    └── dirty/
-""")
+# val / test → 원본 데이터
+val_clear = copy_images(clear_val, "val", "clean")
+val_dirty = copy_images(dirty_val, "val", "dirty")
+print(f"✅ val   : clean={val_clear}, dirty={val_dirty}")
 
+test_clear = copy_images(clear_test, "test", "clean")
+test_dirty = copy_images(dirty_test, "test", "dirty")
+print(f"✅ test  : clean={test_clear}, dirty={test_dirty}")
 
-
+print(f"\n🎉 완료! 결과 폴더: {output_root}")
