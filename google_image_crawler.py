@@ -43,3 +43,21 @@ for filename in os.listdir(input_dir):
         count += 1
 
 print(f"✅ 총 생성된 이미지 수: {count}")
+
+
+import os
+
+input_dir = r"2026_youth/ai26/wash_data"
+
+print("현재 실행 위치:", os.getcwd())
+print("wash_data 존재:", os.path.exists(input_dir))
+
+for label in ["clean", "dirty"]:
+    path = os.path.join(input_dir, label)
+    print(f"\n📂 {label} 폴더 존재:", os.path.exists(path))
+
+    if os.path.exists(path):
+        files = os.listdir(path)
+        print(f"{label} 안 파일 개수:", len(files))
+        print("예시 파일:", files[:3])
+
