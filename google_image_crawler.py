@@ -47,11 +47,23 @@ print(f"✅ 총 생성된 이미지 수: {count}")
 
 import os
 from PIL import Image
+from torchvision import transforms
 
 input_dir = "/home/jetson/2026_youth/ai26/wash_data"
-output_dir = "/home/jetson/2026_youth/ai26/wash_data_test"
+output_dir = "/home/jetson/2026_youth/ai26/wash_data_aug"
 
 os.makedirs(output_dir, exist_ok=True)
+
+transform = transforms.Compose([
+    transforms.RandomRotation(20),
+    transforms.RandomHorizontalFlip(p=0.5),
+    transforms.ColorJitter(brightness=0.3, contrast=0.3),
+    transforms.RandomResizedCrop(224, scale=(0.8, 1.0))
+])
+
+AUG_PER_IMAGE = 10  # ← 이 숫자 조절해서 총 1000장 맞추기
+
+total = 0
 
 for label in ["clean", "dirty"]:
     in_dir = os.path.join(input_dir, label)
@@ -59,10 +71,18 @@ for label in ["clean", "dirty"]:
     os.makedirs(out_dir, exist_ok=True)
 
     for f in os.listdir(in_dir):
-        if f.lower().endswith(".png"):
-            img = Image.open(os.path.join(in_dir, f))
-            img.save(os.path.join(out_dir, f))
+        if not f.lower().endswith(".png"):
+            continue
 
-print("✅ 테스트 완료")
+        img = Image.open(os.path.join(in_dir, f)).convert("RGB")
+        name = f.replace(".png", "")
+
+        for i in range(AUG_PER_IMAGE):
+            aug = transform(img)
+            aug.save(os.path.join(out_dir, f"{name}_aug{i}.png"))
+            total += 1
+
+print(f"✅ 총 생성된 이미지 수: {total}")
+
 
 
