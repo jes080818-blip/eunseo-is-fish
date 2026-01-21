@@ -1,204 +1,69 @@
-# ===============================
-# 0. 라이브러리
-# ===============================
-from mpi4py import MPI
+import os
+import re
 import nltk
-import random
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from collections import Counter
-from torch.utils.data import Dataset, DataLoader
-
-# ===============================
-# 1. MPI 초기화
-# ===============================
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()     # 프로세스 번호
-size = comm.Get_size()    # 전체 프로세스 수
-
-# ===============================
-# 2. NLTK 데이터 경로 설정
-# ===============================
-DATA_PATH = "/home/jetson/2026_youth/ai26/wash_data"
-
-nltk.data.path.append(DATA_PATH)
-nltk.download("movie_reviews", download_dir=DATA_PATH)
-
 from nltk.corpus import movie_reviews
 
 # ===============================
-# 3. 데이터 로드 (rank 0에서만)
+# 1. NLTK 데이터 경로 설정
 # ===============================
-if rank == 0:
-    data = []
-    for fileid in movie_reviews.fileids():
-        text = movie_reviews.words(fileid)
-        label = movie_reviews.categories(fileid)[0]
-        data.append((" ".join(text), label))
+DATA_PATH = "/home/jetson/2026_youth/ai26/wash_data"
+nltk.data.path.append(DATA_PATH)
 
-    random.shuffle(data)
-
-    train_data = data[:1500]
-    test_data  = data[1500:]
-
-else:
-    train_data = None
-    test_data  = None
+# (이미 있으면 다시 안 받음)
+nltk.download("movie_reviews", download_dir=DATA_PATH)
 
 # ===============================
-# 4. 데이터 브로드캐스트
+# 2. 저장할 증강 데이터 경로
 # ===============================
-train_data = comm.bcast(train_data, root=0)
-test_data  = comm.bcast(test_data,  root=0)
+SAVE_BASE = "/home/jetson/2026_youth/ai26/wash_data/augmented_reviews"
 
-# ===============================
-# 5. Vocabulary 생성 (rank 0 → broadcast)
-# ===============================
-if rank == 0:
-    all_tokens = [
-        word.lower()
-        for text, _ in train_data
-        for word in text.split()
-    ]
-    vocab = Counter(all_tokens)
-    vocab_size = 20000
-    most_common = vocab.most_common(vocab_size)
-    itos = [w for w, _ in most_common]
-    stoi = {w: i + 1 for i, w in enumerate(itos)}
-else:
-    stoi = None
-
-stoi = comm.bcast(stoi, root=0)
-vocab_size = len(stoi)
+for label in ["pos", "neg"]:
+    os.makedirs(os.path.join(SAVE_BASE, label), exist_ok=True)
 
 # ===============================
-# 6. 문장 인코딩 함수
+# 3. 전처리 함수 (증강용)
 # ===============================
-def encode_sentence(sent, max_len=200):
-    tokens = sent.lower().split()
-    encoded = [stoi.get(w, 0) for w in tokens[:max_len]]
-    padded = encoded + [0] * (max_len - len(encoded))
-    return torch.tensor(padded)
-
-# ===============================
-# 7. Dataset 정의
-# ===============================
-class MovieDataset(Dataset):
-    def __init__(self, data):
-        self.data = data
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        text, label = self.data[idx]
-        x = encode_sentence(text)
-        y = 1 if label == "pos" else 0
-        return x, torch.tensor(y)
+def preprocess_text(words):
+    """
+    - 소문자 변환
+    - 특수문자 제거
+    """
+    text = " ".join(words).lower()
+    text = re.sub(r"[^a-z\s]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 # ===============================
-# 8. MPI용 데이터 분할
+# 4. 데이터 증강 + 저장
 # ===============================
-local_train_data = train_data[rank::size]
+count = 0
 
-train_loader = DataLoader(
-    MovieDataset(local_train_data),
-    batch_size=32,
-    shuffle=True
-)
+for fileid in movie_reviews.fileids():
+    label = movie_reviews.categories(fileid)[0]
+    words = movie_reviews.words(fileid)
 
-test_loader = DataLoader(
-    MovieDataset(test_data),
-    batch_size=32
-)
+    # (1) 원본 텍스트
+    original_text = " ".join(words)
 
-# ===============================
-# 9. 모델 정의
-# ===============================
-class SentimentRNN(nn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_size):
-        super().__init__()
-        self.embed = nn.Embedding(vocab_size + 1, embed_dim, padding_idx=0)
-        self.lstm = nn.LSTM(embed_dim, hidden_size, batch_first=True)
-        self.fc = nn.Linear(hidden_size, 1)
-        self.act = nn.Sigmoid()
+    # (2) 전처리된 텍스트 (증강)
+    cleaned_text = preprocess_text(words)
 
-    def forward(self, x):
-        emb = self.embed(x)
-        out, _ = self.lstm(emb)
-        out = out[:, -1]
-        out = self.fc(out)
-        return self.act(out)
+    # 파일 이름 (슬래시 제거)
+    base_name = fileid.replace("/", "_")
 
-model = SentimentRNN(
-    vocab_size=vocab_size,
-    embed_dim=128,
-    hidden_size=128
-)
+    # 저장 경로
+    orig_path  = os.path.join(SAVE_BASE, label, f"{base_name}_orig.txt")
+    clean_path = os.path.join(SAVE_BASE, label, f"{base_name}_clean.txt")
 
-criterion = nn.BCELoss()
-optimizer = optim.Adam(model.parameters(), lr=2e-3)
+    # 파일 저장
+    with open(orig_path, "w", encoding="utf-8") as f:
+        f.write(original_text)
 
-# ===============================
-# 10. 학습 (MPI 병렬)
-# ===============================
-epochs = 15
+    with open(clean_path, "w", encoding="utf-8") as f:
+        f.write(cleaned_text)
 
-for epoch in range(epochs):
-    model.train()
-    total_loss = 0.0
+    count += 2
 
-    for x, y in train_loader:
-        pred = model(x)
-        loss = criterion(pred.squeeze(), y.float())
-
-        optimizer.zero_grad()
-        loss.backward()
-
-        # ===== MPI Gradient 평균 =====
-        for param in model.parameters():
-            if param.grad is not None:
-                grad = param.grad.data.numpy()
-                avg_grad = comm.allreduce(grad, op=MPI.SUM)
-                param.grad.data = torch.tensor(avg_grad / size)
-        # =============================
-
-        optimizer.step()
-        total_loss += loss.item()
-
-    # Loss 집계
-    avg_loss = comm.reduce(total_loss, op=MPI.SUM, root=0)
-
-    if rank == 0:
-        print(f"[Epoch {epoch+1}] Loss: {avg_loss / size / len(train_loader):.4f}")
-
-# ===============================
-# 11. 테스트 (rank 0만)
-# ===============================
-if rank == 0:
-    model.eval()
-    correct = 0
-    total = 0
-
-    with torch.no_grad():
-        for x, y in test_loader:
-            pred = model(x)
-            predicted = (pred.squeeze() > 0.5).long()
-            correct += (predicted == y).sum().item()
-            total += y.size(0)
-
-    print("Test Accuracy:", correct / total)
-
-# ===============================
-# 12. 예측 함수 (rank 0)
-# ===============================
-def predict_sent(sent):
-    x = encode_sentence(sent).unsqueeze(0)
-    with torch.no_grad():
-        pred = model(x).item()
-    return "Positive" if pred > 0.5 else "Negative"
-
-if rank == 0:
-    print(predict_sent("I love this movie!"))
-    print(predict_sent("this was the worst film ever!"))
+print("✅ 데이터 증강 완료")
+print(f"총 생성된 리뷰 파일 수: {count}")
+print(f"저장 위치: {SAVE_BASE}")
